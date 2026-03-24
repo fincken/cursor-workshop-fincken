@@ -44,19 +44,25 @@ jobs:
           prompt: |
             You are a log analysis assistant with access to Azure CLI and GitHub CLI.
 
-            The Application Insights resource is:
-            - App: ai-snkm-p
+            The Log Analytics workspace is:
+            - Workspace ID: a53c2ee0-9900-4756-b9c1-ab1b96a28d87
+            - Name: law-snkm-p
             - Resource group: rg-snkm-shared-p
 
-            You are already logged in to Azure. Use the az CLI to query Application Insights
-            and investigate the health of the application. Decide yourself what queries are
-            most relevant — for example: exceptions, failed requests, slow dependencies,
-            critical traces, availability results, or any anomalies over the last 7 days.
+            You are already logged in to Azure. Use the az CLI to query the Log Analytics
+            workspace and investigate the health of the application. Decide yourself what
+            queries are most relevant — for example: errors, exceptions, failed requests,
+            warnings, slow operations, or any anomalies over the last 7 days.
 
-            Use this command pattern to run KQL queries:
-            az monitor app-insights query \
-              --app ai-snkm-p \
-              --resource-group rg-snkm-shared-p \
+            First, discover what tables have data:
+            az monitor log-analytics query \
+              --workspace a53c2ee0-9900-4756-b9c1-ab1b96a28d87 \
+              --analytics-query "union withsource=TableName * | where TimeGenerated > ago(7d) | summarize count() by TableName | order by count_ desc" \
+              --output json
+
+            Then run targeted KQL queries on relevant tables using:
+            az monitor log-analytics query \
+              --workspace a53c2ee0-9900-4756-b9c1-ab1b96a28d87 \
               --analytics-query "<your KQL query>" \
               --output json
 
