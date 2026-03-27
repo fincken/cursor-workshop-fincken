@@ -29,15 +29,27 @@ jobs:
         id: fetch-errors
         env:
           AZ_LOG_WORKSPACE_ID: ${{ secrets.AZ_LOG_WORKSPACE_ID }}
-          AZ_LOG_NAME: ${{ secrets.AZ_LOG_NAME }}
           AZ_LOG_RG: ${{ secrets.AZ_LOG_RG }}
         run: |
-          ERRORS=$(az monitor log-analytics query \
-            --workspace "$AZ_LOG_WORKSPACE_ID" \
-            --analytics-query "$AZ_LOG_NAME | where Level == 'Error' or SeverityLevel == 'error' | summarize count() by Message | top 3 by count_ desc | project Message, count_" \
-            --output json 2>/dev/null || echo "[]")
+          # Try AppExceptions first (Application Insights), then AppTraces, then AzureDiagnostics
+          ERRORS=""
+          for TABLE in AppExceptions AppTraces AzureDiagnostics; do
+            RESULT=$(az monitor log-analytics query \
+              --workspace "$AZ_LOG_WORKSPACE_ID" \
+              --analytics-query "$TABLE | where SeverityLevel >= 3 or Level == 'Error' or Level == 'Critical' | summarize count() by Message = coalesce(OuterMessage, Message, ResultDescription) | top 3 by count_ desc | project Message, count_" \
+              --output json 2>&1)
+            # Check if query returned actual rows (not an error or empty table)
+            ROW_COUNT=$(echo "$RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d))" 2>/dev/null || echo "0")
+            if [ "$ROW_COUNT" -gt 0 ]; then
+              ERRORS="Table: $TABLE\n$RESULT"
+              break
+            fi
+          done
+          if [ -z "$ERRORS" ]; then
+            ERRORS="No errors found in AppExceptions, AppTraces, or AzureDiagnostics."
+          fi
           echo "errors<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$ERRORS" >> "$GITHUB_OUTPUT"
+          printf "%b" "$ERRORS" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: Run Claude to analyze and fix issues
