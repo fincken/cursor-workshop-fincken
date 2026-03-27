@@ -7,9 +7,8 @@ jobs:
   fix-issues:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       issues: write
-      pull-requests: write
     env:
       ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
     steps:
@@ -20,14 +19,26 @@ jobs:
         run: |
           curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
 
-      - name: Run Claude to fetch errors and fix issues
+      - name: Create tracking issue
+        id: create-issue
+        run: |
+          ISSUE_URL=$(gh issue create \
+            --title "Log Analytics error report - $(date -u '+%Y-%m-%d %H:%M UTC')" \
+            --body "Automated run triggered via workflow_dispatch. Claude will post its findings here." \
+            --label "automated")
+          echo "issue_url=$ISSUE_URL" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Run Claude to fetch errors and create issues
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_FOUNDRY_API_KEY }}
           github_token: ${{ github.token }}
           claude_args: "--dangerously-skip-permissions"
           prompt: |
-            You are an automated issue fixer with access to Azure CLI tools.
+            You are an automated error reporter with access to Azure CLI tools.
+            Post all progress and findings as comments on this GitHub issue: ${{ steps.create-issue.outputs.issue_url }}
 
             Step 1 — Authenticate with Azure and fetch the top 3 errors:
             - Log in using: az login --service-principal -u $AZURE_CLIENT_ID -p $AZURE_CLIENT_SECRET --tenant $AZURE_TENANT_ID
@@ -36,16 +47,13 @@ jobs:
             - Based on the available tables, write an appropriate KQL query to find the top 3 most frequent errors in the last 7 days
             - Run the query using: az monitor log-analytics query --workspace $AZ_LOG_WORKSPACE_ID --analytics-query "<your query>" --output json
 
-            Step 2 — Analyze and fix:
-            - Analyze each error message in the context of this codebase
-            - Search the codebase to find the code responsible for each error
-            - For each error with a clear, safe fix:
-              - Implement the fix on a new branch named fix/log-error-<short-slug>
-              - Create a pull request with a clear title, description explaining the error, root cause, and changes made
-            - Skip errors that are ambiguous or too risky to fix automatically
-            - Do not create more than 3 pull requests total
+            Step 2 — For each error found, create a GitHub issue:
+            - Title: a short, descriptive summary of the error
+            - Body: include the full error message, occurrence count, relevant time range, and which part of the codebase is likely responsible based on a quick search
+            - Label each issue with "bug" and "log-analytics"
+            - Post a comment on the tracking issue (${{ steps.create-issue.outputs.issue_url }}) with links to all created issues and a brief summary
 
-            Be conservative: only make targeted, minimal changes. Do not refactor or change unrelated code.
+            Do not attempt to fix any code. Only report and create issues.
         env:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
