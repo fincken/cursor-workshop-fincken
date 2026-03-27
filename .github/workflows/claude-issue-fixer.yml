@@ -20,59 +20,37 @@ jobs:
         run: |
           curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
 
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
-
-      - name: Fetch top 3 errors from Log Analytics
-        id: fetch-errors
-        env:
-          AZ_LOG_WORKSPACE_ID: ${{ secrets.AZ_LOG_WORKSPACE_ID }}
-          AZ_LOG_RG: ${{ secrets.AZ_LOG_RG }}
-        run: |
-          # Try AppExceptions first (Application Insights), then AppTraces, then AzureDiagnostics
-          ERRORS=""
-          for TABLE in AppExceptions AppTraces AzureDiagnostics; do
-            RESULT=$(az monitor log-analytics query \
-              --workspace "$AZ_LOG_WORKSPACE_ID" \
-              --analytics-query "$TABLE | where SeverityLevel >= 3 or Level == 'Error' or Level == 'Critical' | summarize count() by Message = coalesce(OuterMessage, Message, ResultDescription) | top 3 by count_ desc | project Message, count_" \
-              --output json 2>&1)
-            # Check if query returned actual rows (not an error or empty table)
-            ROW_COUNT=$(echo "$RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d))" 2>/dev/null || echo "0")
-            if [ "$ROW_COUNT" -gt 0 ]; then
-              ERRORS="Table: $TABLE\n$RESULT"
-              break
-            fi
-          done
-          if [ -z "$ERRORS" ]; then
-            ERRORS="No errors found in AppExceptions, AppTraces, or AzureDiagnostics."
-          fi
-          echo "errors<<EOF" >> "$GITHUB_OUTPUT"
-          printf "%b" "$ERRORS" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-
-      - name: Run Claude to analyze and fix issues
+      - name: Run Claude to fetch errors and fix issues
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_FOUNDRY_API_KEY }}
           github_token: ${{ github.token }}
           claude_args: "--dangerously-skip-permissions"
           prompt: |
-            You are an automated issue fixer. Here are the top 3 errors from Azure Log Analytics for this application:
+            You are an automated issue fixer with access to Azure CLI tools.
 
-            ${{ steps.fetch-errors.outputs.errors }}
+            Step 1 — Authenticate with Azure and fetch the top 3 errors:
+            - Log in using: az login --service-principal -u $AZURE_CLIENT_ID -p $AZURE_CLIENT_SECRET --tenant $AZURE_TENANT_ID
+            - The Log Analytics workspace ID is in $AZ_LOG_WORKSPACE_ID, resource group in $AZ_LOG_RG, resource name in $AZ_LOG_NAME
+            - First, discover what tables are available: az monitor log-analytics workspace table list --resource-group $AZ_LOG_RG --workspace-name $AZ_LOG_NAME --output table
+            - Based on the available tables, write an appropriate KQL query to find the top 3 most frequent errors in the last 7 days
+            - Run the query using: az monitor log-analytics query --workspace $AZ_LOG_WORKSPACE_ID --analytics-query "<your query>" --output json
 
-            Your task:
-            1. Analyze each error message and understand what it means in the context of this codebase.
-            2. Search the codebase to find the code responsible for each error.
-            3. For each error that has a clear, safe fix:
-               - Implement the fix on a new branch named fix/log-error-<short-slug>
-               - Create a pull request with:
-                 - A clear title describing what is fixed
-                 - A description explaining the error from Log Analytics, root cause, and what was changed
-                 - Label it "automated-fix" if that label exists
-            4. If an error is ambiguous or the fix would be too risky, skip it and move on.
-            5. Do not create more than 3 pull requests total.
+            Step 2 — Analyze and fix:
+            - Analyze each error message in the context of this codebase
+            - Search the codebase to find the code responsible for each error
+            - For each error with a clear, safe fix:
+              - Implement the fix on a new branch named fix/log-error-<short-slug>
+              - Create a pull request with a clear title, description explaining the error, root cause, and changes made
+            - Skip errors that are ambiguous or too risky to fix automatically
+            - Do not create more than 3 pull requests total
 
             Be conservative: only make targeted, minimal changes. Do not refactor or change unrelated code.
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZ_LOG_WORKSPACE_ID: ${{ secrets.AZ_LOG_WORKSPACE_ID }}
+          AZ_LOG_NAME: ${{ secrets.AZ_LOG_NAME }}
+          AZ_LOG_RG: ${{ secrets.AZ_LOG_RG }}
