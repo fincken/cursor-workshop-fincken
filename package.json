@@ -1,6 +1,7 @@
 {
   "name": "cursor-workshop",
   "version": "1.0.0",
+  "author": "kristoffer.finckenhagen@gmail.com",
   "private": true,
   "workspaces": [
     "frontend",
