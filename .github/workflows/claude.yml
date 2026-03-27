@@ -15,7 +15,7 @@ jobs:
       issues: write
       pull-requests: write
     env:
-      ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_FOUNDRY_RESOURCE }}
+      ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
