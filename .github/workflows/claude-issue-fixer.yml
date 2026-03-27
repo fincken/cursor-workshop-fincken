@@ -24,8 +24,7 @@ jobs:
         run: |
           ISSUE_URL=$(gh issue create \
             --title "Log Analytics error report - $(date -u '+%Y-%m-%d %H:%M UTC')" \
-            --body "Automated run triggered via workflow_dispatch. Claude will post its findings here." \
-            --label "automated")
+            --body "Automated run triggered via workflow_dispatch. Claude will post its findings here.")
           echo "issue_url=$ISSUE_URL" >> "$GITHUB_OUTPUT"
         env:
           GH_TOKEN: ${{ github.token }}
